@@ -353,7 +353,9 @@ func TestLyricsFillATallWindow(t *testing.T) {
 		at := time.Duration(i) * 5 * time.Second
 		lines = append(lines, lyrics.Line{At: at, End: at + 5*time.Second, Text: fmt.Sprintf("第%02d句", i)})
 	}
-	for _, size := range [][2]int{{1200, 800}, {750, 1330}, {600, 1400}} {
+	// Taller than wide, but not so tall as to stack: see
+	// TestNowPlayingStacksInATallWindow.
+	for _, size := range [][2]int{{1200, 800}, {1000, 1150}, {900, 1050}} {
 		a := newTestApp()
 		a.pl.Cue([]music.Track{song("1", "改变", "与非门")})
 		a.pl.SetLyrics(lines)
@@ -380,6 +382,58 @@ func TestLyricsFillATallWindow(t *testing.T) {
 		}
 		if want := top + (float32(h)-top)*0.3; lit.Y > want+60 {
 			t.Errorf("%dx%d: the line sung is at %v, want about %v, a third of the way down the lyrics", w, h, lit.Y, want)
+		}
+	}
+}
+
+// In a window much taller than wide, Now Playing stacks what plays over the
+// lyrics, which take all the width, with the controls along the foot: side
+// by side, the lyrics were a narrow strip of wrapped lines beside a cover
+// adrift in the middle of its column. A wide window keeps them side by side.
+func TestNowPlayingStacksInATallWindow(t *testing.T) {
+	var lines []lyrics.Line
+	for i := range 30 {
+		at := time.Duration(i) * 5 * time.Second
+		lines = append(lines, lyrics.Line{At: at, End: at + 5*time.Second, Text: fmt.Sprintf("第%02d句", i)})
+	}
+	for _, c := range []struct {
+		w, h    int
+		stacked bool
+	}{{1200, 800, false}, {1000, 1150, false}, {750, 1330, true}, {600, 1400, true}} {
+		a := newTestApp()
+		a.pl.Cue([]music.Track{song("1", "改变", "与非门")})
+		a.pl.SetLyrics(lines)
+		a.pl.Hold(77 * time.Second) // 第15句
+		a.nowPlaying = true
+		tt := ui.NewTester(a.view, c.w, c.h)
+		settled(tt)
+		settled(tt)
+		cover, ok := tt.Find("Album Cover")
+		if !ok {
+			t.Fatal("no cover")
+		}
+		lit, ok := tt.Find("第15句")
+		if !ok {
+			t.Fatalf("%dx%d: the line sung isn't shown", c.w, c.h)
+		}
+		bar, ok := tt.Find("Progress")
+		if !ok {
+			t.Fatal("no progress bar")
+		}
+		if !c.stacked {
+			if lit.X < cover.X+cover.W {
+				t.Errorf("%dx%d: the lyrics start at x %v, want them beside the cover, which ends at %v", c.w, c.h, lit.X, cover.X+cover.W)
+			}
+			continue
+		}
+		if lit.Y < cover.Y+cover.H || bar.Y < lit.Y+lit.H {
+			t.Errorf("%dx%d: cover %v, line sung %v, progress %v: want them stacked in that order", c.w, c.h, cover, lit, bar)
+		}
+		if lit.X > cover.X+24 {
+			t.Errorf("%dx%d: the lyrics start at x %v, want them level with the cover's left, %v", c.w, c.h, lit.X, cover.X)
+		}
+		if lit.Y > float32(c.h)*0.5 {
+			t.Errorf("%dx%d: the line sung is at %v, want it in the top half", c.w, c.h, lit.Y)
 		}
 	}
 }

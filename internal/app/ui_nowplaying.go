@@ -284,7 +284,6 @@ func (a *app) nowPlayingView(c *ui.Context) {
 }
 
 func (a *app) nowPlayingBody(c *ui.Context, tr *music.Track, art *artwork, accent ui.Color, w, h float32, pointerIn bool) {
-	pl := a.pl
 	a.commentsFor(tr)
 	// An episode has what it is about and its captions in place of lyrics; a
 	// song, lyrics in place of those. Comments are for a source that has them.
@@ -337,6 +336,11 @@ func (a *app) nowPlayingBody(c *ui.Context, tr *music.Track, art *artwork, accen
 			return
 		}
 
+		if npPortrait(w, h) {
+			a.npPortraitBody(c, tr, art, accent, w, h, pointerIn)
+			return
+		}
+
 		side := float32(math.Min(float64(w)*0.36, 440))
 		// The cover leaves room above it for the tabs, starting as far
 		// under them as the wall's song does.
@@ -360,38 +364,8 @@ func (a *app) nowPlayingBody(c *ui.Context, tr *music.Track, art *artwork, accen
 				a.npMorph(c, ui.Box(c.Key("cover-morph")).Size(coverSize, coverSize).AlignSelf(ui.Start)).Children(func() {
 					a.npCover(c, tr, art, coverSize)
 				})
-
-				a.npRise(ui.Row(c).Gap(8).AlignItems(ui.Center).Margin(36, 0, 18, 0), 1).Children(func() {
-					ui.Column(c).Grow(1).Shrink(1).MinWidth(0).Gap(4).Children(func() {
-						if r := pl.Radio(); r != "" {
-							a.radioChip(c, r)
-						}
-						ui.Text(c, tr.Name).FontSize(22).FontWeight(700).LetterSpacing(-0.3).SingleLine()
-						a.artistLinks(c, tr, white.Alpha(0.6), white, true).FontSize(15).SingleLine()
-					})
-					a.likeButton(c.Key("like"), tr, 22, white.Alpha(0.7))
-					a.songMenu(c.Key("more"), tr, 22, white.Alpha(0.7)).Margin(0, -8, 0, 0)
-				})
-				a.npRise(a.scrubber(c.Key("np-scrub"), &a.npScrub, white.Alpha(0.18), white.Alpha(0.9), 16, accent.Mix(white, 0.35)), 2)
-				// As tall with the quality's badge as without it: the badge goes
-				// while the next song loads, and the column would move with it.
-				a.npRise(ui.Row(c).Height(16).AlignItems(ui.Center), 2).Children(func() {
-					ui.Text(c, clock(pl.Position())).FontSize(11).FontFeatures("tnum").TextColor(white.Alpha(0.5))
-					ui.Spacer(c)
-					qualityBadge(c, pl.Stream())
-					ui.Spacer(c)
-					status := "-" + clock(pl.Duration()-pl.Position())
-					if pl.Loading() {
-						status = T("Buffering…")
-					}
-					ui.Text(c, status).FontSize(11).FontFeatures("tnum").TextColor(white.Alpha(0.5))
-				})
-				a.npRise(ui.Box(c).Margin(14, 0, 18, 0), 3).Children(func() {
-					a.transport(c, white, white.Alpha(0.45), accent, 28)
-				})
-				a.npRise(ui.Row(c).Justify(ui.Center), 4).Children(func() {
-					a.volumeSlider(c, white.Alpha(0.7), white.Alpha(0.18), 180)
-				})
+				a.npWhat(c, a.npRise(ui.Row(c).Gap(8).AlignItems(ui.Center).Margin(36, 0, 18, 0), 1), tr)
+				a.npControls(c, accent)
 			})
 
 			pane := ui.Column(c.Key("pane")).Grow(1).Basis(0).MinWidth(0)
@@ -414,20 +388,100 @@ func (a *app) nowPlayingBody(c *ui.Context, tr *music.Track, art *artwork, accen
 					c.AnimationFrame() // not laid out yet: the next frame places it
 				}
 				ui.Box(c).Height(a.npPaneTop)
-				switch a.npPane {
-				case paneLyrics:
-					a.lyricsPane(c, tr, h)
-				case paneComments:
-					a.commentsPane(c, tr)
-				case paneShow:
-					a.showPane(c, tr)
-				case paneCaptions:
-					a.captionsPane(c, tr, h)
-				default:
-					a.queuePane(c)
-				}
+				a.npPaneBody(c, tr, h)
 			})
 		})
+	}
+}
+
+// npPortrait reports whether Now Playing, w by h, stacks what plays over
+// the pane rather than setting them side by side: in a window this much
+// taller than wide, the cover beside the pane leaves the pane a narrow
+// strip, its lines wrapping, with the cover adrift in the middle of its
+// column.
+func npPortrait(w, h float32) bool {
+	return h > w*1.2
+}
+
+// npPortraitBody is Now Playing in a tall window: what plays across the
+// top, its cover beside its name, the pane all the width under it, and
+// the controls along the foot.
+func (a *app) npPortraitBody(c *ui.Context, tr *music.Track, art *artwork, accent ui.Color, w, h float32, pointerIn bool) {
+	padX := npSideX(w)
+	coverSize := min(max(w*0.24, 96), 200)
+	a.npRise(reveal(npTabsRow(c, w), pointerIn), 0).Children(func() { a.paneTabs(c) })
+	// Under the tabs, which come and go with the pointer, out of the flow.
+	ui.Column(c).Grow(1).MinHeight(0).Padding(npTabsHeight+20, padX, 36, padX).Children(func() {
+		ui.Row(c).Gap(24).AlignItems(ui.Center).Children(func() {
+			// The cover flies out of the bar's as Now Playing opens.
+			a.npMorph(c, ui.Box(c.Key("cover-morph")).Size(coverSize, coverSize)).Children(func() {
+				a.npCover(c, tr, art, coverSize)
+			})
+			a.npWhat(c, a.npRise(ui.Row(c).Grow(1).Shrink(1).MinWidth(0).Gap(8).AlignItems(ui.Center), 1), tr)
+		})
+		pane := ui.Column(c.Key("pane")).Grow(1).Basis(0).MinHeight(0).Margin(32, 0, 24, 0)
+		a.npRise(pane, 2)
+		pane.Children(func() { a.npPaneBody(c, tr, h) })
+		ui.Column(c).Children(func() { a.npControls(c, accent) })
+	})
+}
+
+// npWhat fills row with what plays: its name, its artists, liking it and
+// its menu.
+func (a *app) npWhat(c *ui.Context, row ui.Element, tr *music.Track) {
+	row.Children(func() {
+		ui.Column(c).Grow(1).Shrink(1).MinWidth(0).Gap(4).Children(func() {
+			if r := a.pl.Radio(); r != "" {
+				a.radioChip(c, r)
+			}
+			ui.Text(c, tr.Name).FontSize(22).FontWeight(700).LetterSpacing(-0.3).SingleLine()
+			a.artistLinks(c, tr, white.Alpha(0.6), white, true).FontSize(15).SingleLine()
+		})
+		a.likeButton(c.Key("like"), tr, 22, white.Alpha(0.7))
+		a.songMenu(c.Key("more"), tr, 22, white.Alpha(0.7)).Margin(0, -8, 0, 0)
+	})
+}
+
+// npControls is where the song is and the controls: the progress bar and
+// its times, the transport and the volume.
+func (a *app) npControls(c *ui.Context, accent ui.Color) {
+	pl := a.pl
+	a.npRise(a.scrubber(c.Key("np-scrub"), &a.npScrub, white.Alpha(0.18), white.Alpha(0.9), 16, accent.Mix(white, 0.35)), 2)
+	// As tall with the quality's badge as without it: the badge goes
+	// while the next song loads, and the column would move with it.
+	a.npRise(ui.Row(c).Height(16).AlignItems(ui.Center), 2).Children(func() {
+		ui.Text(c, clock(pl.Position())).FontSize(11).FontFeatures("tnum").TextColor(white.Alpha(0.5))
+		ui.Spacer(c)
+		qualityBadge(c, pl.Stream())
+		ui.Spacer(c)
+		status := "-" + clock(pl.Duration()-pl.Position())
+		if pl.Loading() {
+			status = T("Buffering…")
+		}
+		ui.Text(c, status).FontSize(11).FontFeatures("tnum").TextColor(white.Alpha(0.5))
+	})
+	a.npRise(ui.Box(c).Margin(14, 0, 18, 0), 3).Children(func() {
+		a.transport(c, white, white.Alpha(0.45), accent, 28)
+	})
+	a.npRise(ui.Row(c).Justify(ui.Center), 4).Children(func() {
+		a.volumeSlider(c, white.Alpha(0.7), white.Alpha(0.18), 180)
+	})
+}
+
+// npPaneBody is the pane chosen: the lyrics, the comments, what an
+// episode is about, its captions, or what plays next.
+func (a *app) npPaneBody(c *ui.Context, tr *music.Track, h float32) {
+	switch a.npPane {
+	case paneLyrics:
+		a.lyricsPane(c, tr, h)
+	case paneComments:
+		a.commentsPane(c, tr)
+	case paneShow:
+		a.showPane(c, tr)
+	case paneCaptions:
+		a.captionsPane(c, tr, h)
+	default:
+		a.queuePane(c)
 	}
 }
 
